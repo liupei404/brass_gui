@@ -26,8 +26,8 @@
 #include "cw.h"
 #include "cw_key.h"
 #include "pannel.h"
-#include "rtty.h"
 #include "backlight.h"
+#include "rtty.h"
 #include "events.h"
 #include "queue.h"
 #include "gps.h"
@@ -40,6 +40,7 @@
 #include "render/render.h"
 #include "hw/gpio.h"
 #include "hw/iio.h"
+#include "hw/power.h"
 #include "settings/bands.h"
 #include "settings/modes.h"
 #include "settings/options.h"
@@ -71,8 +72,15 @@ void main_exit() {
     settings_bands_save();
     settings_modes_save();
     settings_options_save();
-    vt_enable();
-    exit(1);
+
+    // 关闭背光
+    backlight_set_brightness(-1);
+
+    // 关闭射频输出
+    gpio_set_tx(false);
+
+    // 执行系统关机
+    power_shutdown();
 }
 
 int main(void) {
@@ -96,6 +104,7 @@ int main(void) {
     event_init();
     gpio_init();
     iio_init();
+    power_init();
     bands_init();
 
     lv_disp_draw_buf_init(&disp_buf, buf_1, buf_2, DISP_BUF_SIZE);
@@ -149,10 +158,9 @@ int main(void) {
     dac_init();
     mb_init();
 
-/*
     backlight_init();
     gps_init();
-*/
+
     uint64_t prev_time = get_time();
 
     lv_scr_load(main_obj);
@@ -163,11 +171,20 @@ int main(void) {
         lv_timer_handler();
         queue_work();
 
-        uint64_t now = get_time();
-        uint64_t delta = now - prev_time;
+        // 检查电台状态
+        if (radio_tick()) {
+            uint64_t now = get_time();
+            uint64_t delta = now - prev_time;
 
-        lv_tick_inc(delta);
-        prev_time = now;
+            lv_tick_inc(delta);
+            prev_time = now;
+        } else {
+            // 如果返回 false，检查是否需要关机
+            if (radio_get_state() == RADIO_POWEROFF) {
+                lv_unlock();
+                main_exit();
+            }
+        }
 
         lv_unlock();
         usleep(100);

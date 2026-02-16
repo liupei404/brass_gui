@@ -32,6 +32,7 @@
 #include "hw/xvrt.h"
 #include "hw/pa_bias.h"
 #include "hw/iio.h"
+#include "hw/power.h"
 
 #define FLOW_RESTART_TIMOUT     300
 
@@ -43,96 +44,17 @@ static tx_band_item_t           *current_tx_band = NULL;
 bool check_freq(uint64_t freq, uint32_t *shift, int32_t *corr);
 
 bool radio_tick() {
-/*
-    if (x6100_flow_read(pack)) {
-        prev_time = now_time;
-
-        static uint8_t delay = 0;
-
-        if (delay++ > 10) {
-            delay = 0;
-            clock_update_power(pack->vext * 0.1f, pack->vbat*0.1f, pack->batcap);
-        }
-
-        dsp_samples(pack->samples, RADIO_SAMPLES);
-
-        switch (state) {
-            case RADIO_RX:
-                if (pack->flag.tx) {
-                    state = RADIO_TX;
-                    event_send(main_obj, EVENT_RADIO_TX, NULL);
-                }
-                break;
-
-            case RADIO_TX:
-                if (!pack->flag.tx) {
-                    state = RADIO_RX;
-                    event_send(main_obj, EVENT_RADIO_RX, NULL);
-                } else {
-                    tx_info_update(pack->tx_power * 0.1f, pack->vswr * 0.1f, pack->alc_level * 0.1f);
-                }
-                break;
-
-            case RADIO_ATU_START:
-                radio_lock();
-                x6100_control_atu_tune(true);
-                radio_unlock();
-                state = RADIO_ATU_WAIT;
-                break;
-                
-            case RADIO_ATU_WAIT:
-                if (pack->flag.tx) {
-                    event_send(main_obj, EVENT_RADIO_TX, NULL);
-                    state = RADIO_ATU_RUN;
-                }
-                break;
-                
-            case RADIO_ATU_RUN:
-                if (!pack->flag.tx) {
-                    params_atu_save(pack->atu_params);
-                    radio_lock();
-                    x6100_control_atu_tune(false);
-                    radio_unlock();
-                    event_send(main_obj, EVENT_RADIO_RX, NULL);
-                    
-                    if (params.atu) {
-                        radio_lock();
-                        x6100_control_cmd(x6100_atu_network, pack->atu_params);
-                        radio_unlock();
-                        params.atu_loaded = true;
-                        event_send(main_obj, EVENT_ATU_UPDATE, NULL);
-                    }
-                    state = RADIO_RX;
-                } else {
-                    tx_info_update(pack->tx_power * 0.1f, pack->vswr * 0.1f, pack->alc_level * 0.1f);
-                }
-                break;
-
-            case RADIO_SWRSCAN:
-                dialog_swrscan_update(pack->vswr * 0.1f);
-                break;
-                
-            case RADIO_POWEROFF:
-                x6100_control_poweroff();
-                state = RADIO_OFF;
-                break;
-                
-            case RADIO_OFF:
-                break;
-        }
-        
-        hkey_put(pack->hkey);
-    } else {
-        if (d > FLOW_RESTART_TIMOUT) {
-            LV_LOG_WARN("Flow reset");
-            prev_time = now_time;
-            x6100_flow_restart();
-            dsp_reset();
-        }
-        return true;
+    // 检查关机状态
+    if (state == RADIO_POWEROFF) {
+        return false;
     }
-    */
-    return false;
+
+    // 检查已关机状态
+    if (state == RADIO_OFF) {
+        return false;
+    }
+
+    return true;
 }
 
 void radio_load_bpf() {
@@ -567,7 +489,10 @@ float radio_change_pwr(int16_t d) {
 }
 
 void radio_poweroff() {
-    state = RADIO_POWEROFF;
+    if (state != RADIO_OFF) {
+        state = RADIO_POWEROFF;
+        LV_LOG_INFO("Radio power off initiated");
+    }
 }
 
 void radio_set_ptt(bool on) {
